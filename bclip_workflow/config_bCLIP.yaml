@@ -1,0 +1,49 @@
+---
+  # Input
+  samples_file: "/scicore/home/zavolan/GROUP/StefanieCLIP/aleksei/metadata/start_bCLIP_and_ChipSeq_samples.tsv"
+
+  # Output
+  output_dir: "/scicore/home/zavolan/GROUP/StefanieCLIP/aleksei/output/"
+  local_log: "/scicore/home/zavolan/GROUP/StefanieCLIP/aleksei/output/local_log/"
+  cluster_log: "/scicore/home/zavolan/GROUP/StefanieCLIP/aleksei/temp_dir/slurm/"
+  
+  # Processing parameters
+
+  # Make sure Snakemake isn't trying to use filepaths as wildcards for lane
+  lane_constraints: "[A-Za-z0-9]+"
+  
+  # cut weird adapter sequence
+  five_prime_adapter: "CCTTGGCACCC"
+
+  # sequence quality threshold in 
+  seq_qual_thr: "25"
+
+  # trim first bases 
+  trim_first_bases: "3"
+
+  
+  # Demultiplexing
+  # Allowed percentage of mismatches in barcodes
+  # Note: if set to 0.15, one mismatch is allowed in a barcode of 8nt; if barcodes are too similar (differ only by 1nt) individual samples can thus not be separated effectively
+  demux_error_rate: 0
+
+  # poly(A) tail trimming:
+  # length of poly(A) stretches to be removed
+  a_tail_length:  "AAAAAAAAAAAAAA"
+  # define the error rate during poly(A) tail trimming
+  polyA_error_rate: 0.1
+  # minimum overlap of the "adapter" with the read
+  # (1 means: even a single A is trimmed at the 3'end)
+  polyA_min_overlap: 1
+  # minimum read length after adapter trimming
+  min_length: 5
+
+  # STAR mapping
+  output_dir: "/scicore/home/zavolan/GROUP/StefanieCLIP/aleksei/output/"
+  
+  
+  # max read length after demultiplexing and deduplication
+  # bclip: 51nt - 9 - 4 = 38
+  sjdbOverhang: 38
+  multimappers: 50
+  

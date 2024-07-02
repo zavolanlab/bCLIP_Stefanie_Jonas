@@ -1,0 +1,15 @@
+---
+channels:
+  - anaconda
+  - conda-forge
+  - bioconda
+dependencies:
+  - bedtools=2.27.1
+  - bedops=2.4.41
+  - python=3.10
+  - pandas=1.5.2
+  - numpy=1.23.5
+  - seaborn=0.12.1
+  - matplotlib=3.6.2
+  
+...

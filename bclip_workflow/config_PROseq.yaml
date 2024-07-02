@@ -1,0 +1,24 @@
+---
+  # Input
+  samples_file: "/scicore/home/zavolan/GROUP/StefanieCLIP/aleksei/metadata/start_PROseq_samples.tsv"
+
+  # Output
+  output_dir: "/scicore/home/zavolan/GROUP/StefanieCLIP/aleksei/output/"
+  local_log: "/scicore/home/zavolan/GROUP/StefanieCLIP/aleksei/output/local_log/"
+  cluster_log: "/scicore/home/zavolan/GROUP/StefanieCLIP/aleksei/temp_dir/slurm/"
+  
+  # Processing parameters
+
+  # Make sure Snakemake isn't trying to use filepaths as wildcards for lane
+  lane_constraints: "[A-Za-z0-9]+"
+
+  # cut small RNA 3'adapter sequence
+  three_prime_adapter: "TGGAATTCTCGGGTGCCAAGG"
+
+  # Demultiplexing
+  # Allowed percentage of mismatches in barcodes
+  # Note: if set to 0.15, one mismatch is allowed in a barcode of 8nt; if barcodes are too similar (differ only by 1nt) individual samples can thus not be separated effectively
+  demux_error_rate: 0
+
+  # STAR mapping
+  output_dir: "/scicore/home/zavolan/GROUP/StefanieCLIP/aleksei/output/"  

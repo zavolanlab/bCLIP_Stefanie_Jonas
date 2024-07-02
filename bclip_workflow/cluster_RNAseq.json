@@ -1,0 +1,467 @@
+{
+"__default__":
+{
+"queue":"6hours",
+"partition":"scicore",
+"time": "06:00:00",
+"threads":"1",
+"mem":"40G",
+"out": "/scicore/home/zavolan/GROUP/StefanieCLIP/aleksei/temp_dir/slurm/{rule}.{wildcards}-%j-%N.out"
+},
+"create_symb_links_for_demultiplexed_reads":
+{
+"queue":"6hours",
+"partition":"scicore",
+"time": "00:10:00",
+"threads":"1",
+"mem":"2G"
+},
+"estimate_max_read_length":
+{
+"queue":"6hours",
+"partition":"scicore",
+"time": "00:10:00",
+"threads":"1",
+"mem":"2G"
+},
+"create_STAR_indices":
+{
+"queue":"1day",
+"partition":"scicore",
+"time": "23:59:00",
+"threads":"12",
+"mem":"70G"
+},
+"map_genome_star":
+{
+"queue":"6hours",
+"partition":"scicore",
+"time": "05:59:00",
+"threads":"8",
+"mem":"50G"
+},
+"pigz_unmapped_reads":
+{
+"queue":"6hours",
+"partition":"scicore",
+"time": "05:59:00",
+"threads":"6",
+"mem":"5G"
+},
+"fastqc_unmapped":
+{
+"queue":"6hours",
+"partition":"scicore",
+"time": "05:59:00",
+"threads":"1",
+"mem":"5G"
+},
+"bamTofastq":
+{
+"queue":"6hours",
+"partition":"scicore",
+"time": "05:59:00",
+"threads":"4",
+"mem":"30G"
+},
+"dedupbamTofastq":
+{
+"queue":"6hours",
+"partition":"scicore",
+"time": "05:59:00",
+"threads":"4",
+"mem":"30G"
+},
+"pigz_mapped_fastq":
+{
+"queue":"6hours",
+"partition":"scicore",
+"time": "05:59:00",
+"threads":"6",
+"mem":"5G"
+},
+"pigz_dedupmapped_fastq":
+{
+"queue":"6hours",
+"partition":"scicore",
+"time": "05:59:00",
+"threads":"6",
+"mem":"5G"
+},
+"fastqc_mapped":
+{
+"queue":"6hours",
+"partition":"scicore",
+"time": "05:59:00",
+"threads":"10",
+"mem":"5G"
+},
+"fastqc_all":
+{
+"queue":"6hours",
+"partition":"scicore",
+"time": "05:59:00",
+"threads":"10",
+"mem":"5G"
+},    
+"GN_map_STAR":
+{
+"queue":"6hours",
+"partition":"scicore",
+"time": "01:00:00",
+"threads":"12",
+"mem":"50G"
+},
+"GN_index_mappings":
+{
+"queue":"6hours",
+"partition":"scicore",
+"time": "02:00:00",
+"threads":"8",
+"mem":"30G"
+},
+"GN_umi_collapse":
+{
+"queue":"6hours",
+"partition":"scicore",
+"time": "04:00:00",
+"threads":"1",
+"mem":"30G"
+},
+"GN_index_dedup":
+{
+"queue":"6hours",
+"partition":"scicore",
+"time": "02:00:00",
+"threads":"8",
+"mem":"30G"
+},
+"peak_calling":
+{
+"queue":"1day",
+"partition":"scicore",
+"time": "23:00:00",
+"threads":"15",
+"mem":"60G"
+},
+"samtools_index_genome":
+{
+"queue":"6hours",
+"partition":"scicore",
+"time": "05:59:00",
+"threads":"1",
+"mem":"30G"
+},
+"get_genome_segmentations":
+{
+"queue":"6hours",
+"partition":"scicore",
+"time": "05:59:00",
+"threads":"1",
+"mem":"240G"
+},
+"get_sel_TSSs_for_metaplots":
+{
+"queue":"6hours",
+"partition":"scicore",
+"time": "05:59:00",
+"threads":"3",
+"mem":"90G"
+},
+"get_sel_TSSs_for_quantification":
+{
+"queue":"6hours",
+"partition":"scicore",
+"time": "05:59:00",
+"threads":"3",
+"mem":"90G"
+},
+"bamTobed":
+{
+"queue":"6hours",
+"partition":"scicore",
+"time": "05:59:00",
+"threads":"1",
+"mem":"200G"
+},
+"groupBamToBedFile":
+{
+"queue":"6hours",
+"partition":"scicore",
+"time": "05:59:00",
+"threads":"1",
+"mem":"200G"
+},
+"separate_grouped_bed_into_chromosomes":
+{
+"queue":"6hours",
+"partition":"scicore",
+"time": "05:59:00",
+"threads":"1",
+"mem":"20G"
+},
+"separate_binned_genome_segmentation_into_chromosomes":
+{
+"queue":"6hours",
+"partition":"scicore",
+"time": "05:59:00",
+"threads":"1",
+"mem":"50G"
+},
+"map_to_exon_intron_segmentation":
+{
+"queue":"6hours",
+"partition":"scicore",
+"time": "05:59:00",
+"threads":"1",
+"mem":"50G"
+},
+"map_to_binned_segmentation_by_chromosomes":
+{
+"queue":"6hours",
+"partition":"scicore",
+"time": "05:59:00",
+"threads":"1",
+"mem":"70G"
+},
+"map_to_sel_TSSs_by_chromosomes":
+{
+"queue":"6hours",
+"partition":"scicore",
+"time": "05:59:00",
+"threads":"1",
+"mem":"50G"
+},
+"draw_metaplots":
+{
+"queue":"6hours",
+"partition":"scicore",
+"time": "05:59:00",
+"threads":"5",
+"mem":"90G"
+},
+"get_read_names_for_each_read_category":
+{
+"queue":"6hours",
+"partition":"scicore",
+"time": "05:59:00",
+"threads":"1",
+"mem":"100G"
+},
+"picard_get_sam_file_for_read_categories":
+{
+"queue":"6hours",
+"partition":"scicore",
+"time": "05:59:00",
+"threads":"1",
+"mem":"100G"
+},
+"samtools_get_no_header_sam":
+{
+"queue":"6hours",
+"partition":"scicore",
+"time": "05:59:00",
+"threads":"4",
+"mem":"20G"
+},
+"get_cigar_stats_from_sam_file":
+{
+"queue":"6hours",
+"partition":"scicore",
+"time": "05:59:00",
+"threads":"1",
+"mem":"40G"
+},
+"category_specific_sam_Tofastq":
+{
+"queue":"6hours",
+"partition":"scicore",
+"time": "05:59:00",
+"threads":"4",
+"mem":"20G"
+},
+"pigz_category_specific_fastq":
+{
+"queue":"6hours",
+"partition":"scicore",
+"time": "05:59:00",
+"threads":"6",
+"mem":"5G"
+},
+"fastqc_category_specific_fastq":
+{
+"queue":"6hours",
+"partition":"scicore",
+"time": "05:59:00",
+"threads":"1",
+"mem":"5G"
+},
+"fastqc_trimmed":
+{
+"queue":"6hours",
+"partition":"scicore",
+"time": "05:59:00",
+"threads":"1",
+"mem":"5G"
+},
+"remove_polya":
+{
+"queue":"6hours",
+"partition":"scicore",
+"time": "05:59:00",
+"threads":"10",
+"mem":"50G"
+},
+"trim_five_prime":
+{
+"queue":"6hours",
+"partition":"scicore",
+"time": "05:59:00",
+"threads":"10",
+"mem":"50G"
+},
+"trim_first_bases":
+{
+"queue":"6hours",
+"partition":"scicore",
+"time": "05:59:00",
+"threads":"10",
+"mem":"50G"
+},
+"trim_by_quality":
+{
+"queue":"6hours",
+"partition":"scicore",
+"time": "05:59:00",
+"threads":"10",
+"mem":"50G"
+},
+"fastqc_five_prime_trimmed":
+{
+"queue":"6hours",
+"partition":"scicore",
+"time": "05:59:00",
+"threads":"1",
+"mem":"5G"
+},
+"fastqc_first_bases_trimmed":
+{
+"queue":"6hours",
+"partition":"scicore",
+"time": "05:59:00",
+"threads":"1",
+"mem":"5G"
+},
+"fastqc_quality_trimmed":
+{
+"queue":"6hours",
+"partition":"scicore",
+"time": "05:59:00",
+"threads":"1",
+"mem":"5G"
+},
+"separate_reads_by_length":
+{
+"queue":"6hours",
+"partition":"scicore",
+"time": "05:59:00",
+"threads":"4",
+"mem":"50G"
+},
+"fastqc_trimmed_long":
+{
+"queue":"6hours",
+"partition":"scicore",
+"time": "05:59:00",
+"threads":"1",
+"mem":"5G"
+},
+"fastqc_trimmed_short":
+{
+"queue":"6hours",
+"partition":"scicore",
+"time": "05:59:00",
+"threads":"1",
+"mem":"5G"
+},
+"map_genome_star_short_long":
+{
+"queue":"6hours",
+"partition":"scicore",
+"time": "05:59:00",
+"threads":"10",
+"mem":"100G"
+},
+"get_uniquely_mapped_reads":
+{
+"queue":"6hours",
+"partition":"scicore",
+"time": "05:59:00",
+"threads":"4",
+"mem":"20G"
+},
+"fastqc_uniquely_mapped":
+{
+"queue":"6hours",
+"partition":"scicore",
+"time": "05:59:00",
+"threads":"10",
+"mem":"5G"
+},
+"get_low_duplicate_bam":
+{
+"queue":"6hours",
+"partition":"scicore",
+"time": "05:59:00",
+"threads":"8",
+"mem":"40G"
+},
+"get_single_reads_from_paired_bam":
+{
+"queue":"6hours",
+"partition":"scicore",
+"time": "05:59:00",
+"threads":"8",
+"mem":"40G"
+},
+"fastqc_low_duplicate":
+{
+"queue":"6hours",
+"partition":"scicore",
+"time": "05:59:00",
+"threads":"10",
+"mem":"5G"
+},
+"fastqc_single_reads":
+{
+"queue":"6hours",
+"partition":"scicore",
+"time": "05:59:00",
+"threads":"10",
+"mem":"5G"
+},
+"samtools_get_bam_file_for_read_categories":
+{
+"queue":"6hours",
+"partition":"scicore",
+"time": "05:59:00",
+"threads":"4",
+"mem":"20G"
+},
+"samtools_sort_bam_file_for_read_categories":
+{
+"queue":"6hours",
+"partition":"scicore",
+"time": "05:59:00",
+"threads":"4",
+"mem":"20G"
+},
+"samtools_index_bam_file_for_read_categories":
+{
+"queue":"6hours",
+"partition":"scicore",
+"time": "05:59:00",
+"threads":"4",
+"mem":"20G"
+}
+}

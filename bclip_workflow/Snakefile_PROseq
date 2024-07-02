@@ -1,0 +1,1641 @@
+import os
+import pandas as pd
+import shutil
+import yaml
+from shlex import quote
+from typing import Tuple
+from snakemake.utils import validate
+
+## Preparations
+
+configfile: "config_PROseq.yaml"
+localrules:  finish, create_symb_links_for_input_reads, aggregate_max_read_length_estimates, create_STAR_indices, create_symb_links_for_STAR_indices
+wildcard_constraints: lane = config["lane_constraints"]
+
+# Get sample table
+samples = pd.read_csv(
+    config["samples_file"],
+    header=0,
+    index_col=0,
+    comment='#',
+    engine='python',
+    sep="\t")
+
+# functions
+
+def get_chr_separated_group_bed_files(wildcards):
+    """
+        get which checkpoints to run - output dir path
+    """
+    ck_output = checkpoints.separate_grouped_bed_into_chromosomes.get(sample = wildcards.sample, short_long = wildcards.short_long).output[0]
+    return os.path.join(ck_output, "{chr}.grouped.bed")
+
+def get_chr_sel_TSSs_for_quantification(wildcards):
+    """
+        get which checkpoints to run - output dir path
+    """
+    ck_output = checkpoints.get_sel_TSSs_for_quantification.get(organism = samples.loc[wildcards.sample, 'organism']).output[0]
+    return os.path.join(ck_output, "{chr}.bed")
+
+def get_chr_separated_binned_genome_segmentation(wildcards):
+    """
+        get which checkpoints to run
+    """
+    ck_output = checkpoints.separate_binned_genome_segmentation_into_chromosomes.get(organism = samples.loc[wildcards.sample, 'organism']).output[0]
+    return os.path.join(ck_output, "{chr}.bed")
+    
+
+# get expected chromosome-separated file paths
+def get_chr_separated_binned_genome_counts(): 
+    final_list = []
+    for index,row in samples.iterrows():
+        for short_long in ['all']:
+            final_list = final_list+[os.path.join(config["output_dir"],"samples",row.name,"segment_counts_"+short_long,"binned_genome",(row.name+"."+chr)+".wd_counts.tsv") for chr in row['chromosomes'].split(' ')]
+    return final_list
+
+# get expected chromosome-separated sel TSS counts
+def get_chr_separated_sel_TSSs_counts():
+    final_list = []
+    for index,row in samples.iterrows():
+        for short_long in ['all']:
+            final_list = final_list+[os.path.join(config["output_dir"],"samples",row.name,"segment_counts_"+short_long,"sel_TSSs",(row.name+"."+chr)+".wd_counts.tsv") for chr in row['chromosomes'].split(' ')]
+    return final_list    
+
+rule finish:
+    input:
+        no_polya_fastq = expand(os.path.join(
+            config["output_dir"],
+            "samples",
+            "{sample}",
+            "fastq_trimmed",
+            "{sample}.fastq.gz"),
+        sample=list(samples.index.values)),
+        fastqc_trimmed = expand(os.path.join(
+            config["output_dir"],
+            "samples",
+            "{sample}",
+            "fastqc_trimmed"),
+        sample=list(samples.index.values)),
+        fastqc_three_prime_trimmed = expand(os.path.join(
+            config["output_dir"],
+            "samples",
+            "{sample}",
+            "fastqc_three_prime_trimmed"),
+        sample=list(samples.index.values)),
+        STAR_index_symb_link = expand(os.path.join(
+            config["output_dir"],
+            "samples",
+            "{sample}",
+            "STAR_index"),
+        sample=list(samples.index.values)),
+        bam_short_long=expand(os.path.join(
+            config["output_dir"],
+            "samples",
+            "{sample}",
+            "map_genome_{short_long}",
+            "{sample}.Aligned.sortedByCoord.out.bam",
+        ),
+        sample=list(samples.index.values), short_long=['all']),
+        fastqc_uniquely_mapped=expand(os.path.join(
+            config["output_dir"],
+            "samples",
+            "{sample}",
+            "fastqc_mapped_{short_long}_unique"),
+        sample = list(samples.index.values), short_long=['all']),
+        fastqc_low_duplicate = expand(os.path.join(
+            config["output_dir"],
+            "samples",
+            "{sample}",
+            "fastqc_low_duplicate_{short_long}"),
+        sample = list(samples.index.values),short_long=['all']),
+        grouped_bed=expand(os.path.join(
+            config["output_dir"],
+            "samples",
+            "{sample}",
+            "map_genome_{short_long}",
+            "{sample}.dedup.sorted.indexed.grouped.bed",
+        ),
+        sample = list(samples.index.values),short_long=['all']),
+        exon_intron_counts=expand(os.path.join(
+            config["output_dir"],
+            "samples",
+            "{sample}",
+            "segment_counts_{short_long}",
+            "exon_intron",
+            "{sample}.wd_counts.tsv",
+        ),
+        sample = list(samples.index.values),short_long=['all']),
+        binned_counts=get_chr_separated_binned_genome_counts(),
+        sel_TSSs_counts=get_chr_separated_sel_TSSs_counts(),
+        metaplot_pdf = expand(os.path.join(config["output_dir"],"samples","{sample}","segment_counts_{short_long}","metaplot","{sample}.1.uniquely_mapped_0.metaplot_density.pdf"),
+                        sample = list(samples.index.values),short_long=['all']),
+        metaplot_5ends_pdf = expand(os.path.join(config["output_dir"],"samples","{sample}","segment_counts_{short_long}","metaplot_5ends","{sample}.1.uniquely_mapped_0.metaplot_density.pdf"),
+                        sample = list(samples.index.values),short_long=['all']),
+        # category_specific_bam_file = expand(os.path.join(
+        #     config["output_dir"],
+        #     "samples",
+        #     "{sample}",
+        #     "map_genome_{short_long}",
+        #     "read_categories",
+        #     "{d_cat}_{mm_mode}","{sample}.{d_cat}_{mm_mode}.sam"),
+        # mm_mode = ['um','mm'], d_cat = ['0'], sample = list(samples.index.values),short_long=['all']),
+        # bai = expand(os.path.join(
+        #     config["output_dir"],
+        #     "samples",
+        #     "{sample}",
+        #     "map_genome_{short_long}",
+        #     "read_categories",
+        #     "{d_cat}_{mm_mode}","{sample}.{d_cat}_{mm_mode}.sorted.bam.bai"),
+        # mm_mode = ['um'], d_cat = ['0'], sample = list(samples.index.values), short_long=['all']),
+        # fastqc_category_specific = expand(os.path.join(
+        #     config["output_dir"],
+        #     "samples",
+        #     "{sample}",
+        #     "map_genome_{short_long}",
+        #     "read_categories",
+        #     "{d_cat}_{mm_mode}","fastqc"),
+        #   mm_mode = ['um'], d_cat = ['0'], sample = list(samples.index.values),short_long=['all']),
+
+rule create_symb_links_for_input_reads:
+    """
+        create symbolyc links for demultiplexed reads
+    """
+    input:
+        reads = lambda wildcards: samples.loc[wildcards.sample, "lane_file"],
+    output:
+        moved_reads = os.path.join(
+            config["output_dir"],
+            "samples",
+            "{sample}",
+            "fastq",
+            "{sample}.fastq.gz"),
+    params:
+        outdir = os.path.join(config["output_dir"],"samples","{sample}","fastq"),
+    threads: 1
+    log:
+        os.path.join(config["local_log"],"create_symb_links_for_demultiplexed_reads__{sample}.log")
+
+    shell:
+        """(mkdir -p {params.outdir}; ln -f -s {input.reads} {output.moved_reads}) &> {log}"""
+
+rule fastqc_all:
+    """
+        A quality control tool for high throughput sequence data
+    """
+    input:
+        reads=os.path.join(
+            config["output_dir"],
+            "samples",
+            "{sample}",
+            "fastq",
+            "{sample}.fastq.gz"),
+    output:
+        outdir=directory(os.path.join(
+            config["output_dir"],
+            "samples",
+            "{sample}",
+            "fastqc_all")),
+    threads: 10
+    singularity:
+        "docker://staphb/fastqc:0.12.1"
+    log:
+        os.path.join(config["local_log"],"fastqc_all__{sample}.log")
+    shell:
+        """(set +o pipefail; mkdir -p {output.outdir}; \
+        s=$(zcat {input.reads} | head -n 2 | tail -n 1 | awk '{{print length}}'); \
+        l=$((s<150 ? s : 150)); \
+        fastqc --outdir {output.outdir} \
+        --threads {threads} --dup_length $l \
+        {input.reads}) \
+        &> {log}"""
+
+rule estimate_max_read_length:
+    """
+         estimate max read length in a sample
+         To use as input for STAR 
+    """
+    input:
+        reads = os.path.join(
+            config["output_dir"],
+            "samples",
+            "{sample}",
+            "fastq",
+            "{sample}.fastq.gz"),
+    output:
+        max_read_length = os.path.join(
+            config["output_dir"],
+            "samples",
+            "{sample}",
+            "read_length",
+            "{sample}.max_read_length.txt"),
+    params:
+        outdir = directory(os.path.join(config["output_dir"],"samples","{sample}","read_length")),
+
+    threads: 1
+    singularity:
+        "docker://pegi3s/seqkit"
+    log:
+        os.path.join(config["local_log"],"estimate_max_read_length__{sample}.log")
+
+    shell:
+        """(set +o pipefail; mkdir -p {params.outdir}; seqkit sample \
+        -p 0.3 {input.reads} | seqkit head -n 1000 | seqkit seq -s | \
+        awk '{{print length}}' | \
+        awk 'BEGIN{{a=0}}{{if ($1>0+a) a=$1}} END{{print a}}' > {output.max_read_length}) &> {log}"""
+
+rule aggregate_max_read_length_estimates:
+    """
+         aggregate_max read length estimates over all samples
+    """
+    input:
+        max_read_length_estimates = expand(os.path.join(
+            config["output_dir"],
+            "samples",
+            "{sample}",
+            "read_length",
+            "{sample}.max_read_length.txt"),
+            sample = list(samples.index)),
+        script=os.path.join(workflow.basedir, "scripts", "aggregate_max_read_length_estimates.py"),
+    output:
+        max_read_lengths_aggr = os.path.join(
+            config["output_dir"],
+            "misc",
+            "max_read_lengths.PROseq.tsv"),
+    params:
+        outdir = os.path.join(config["output_dir"],"misc"),
+
+    threads: 1
+    conda:
+        "envs/pandas.yaml"
+    log:
+        os.path.join(config["local_log"],"aggregate_max_read_length_estimates.log")
+    shell:
+        """(mkdir -p {params.outdir}; \
+        python {input.script} \
+        --input_samples """+config["samples_file"]+""" \
+        --results_dir """+config["output_dir"]+""" \
+        --out_file {output.max_read_lengths_aggr}) &> {log}"""
+
+rule create_STAR_indices:
+    """
+        Create indices for STAR alignments
+        The rule submits slurm jobs itself and waits until all of them are executed  
+    """
+    input:
+        max_read_lengths_aggr = os.path.join(
+            config["output_dir"],
+            "misc",
+            "max_read_lengths.PROseq.tsv"),
+        script=os.path.join(workflow.basedir, "scripts", "create_STAR_indices.py"),
+    output:
+        success_flag=os.path.join(
+            config["output_dir"],
+            "STAR_index","success.txt"),
+    params:
+        STAR_indices_dir=os.path.join(
+            config["output_dir"],
+            "STAR_index"),
+        threads_number = 12,
+        docker_image = "docker://quay.io/biocontainers/star:2.7.8a--h9ee0642_1",
+        docker_image_target_path=os.path.join(workflow.basedir, ".snakemake", "singularity","star.simg"),
+    threads: 1
+    log:
+        os.path.join(config["local_log"],"create_STAR_indices.log")
+    shell:
+        """(python {input.script} \
+        --max_read_lengths_aggr {input.max_read_lengths_aggr} \
+        --cluster_log_dir """+config["cluster_log"]+""" \
+        --threads_number {params.threads_number} \
+        --docker_image {params.docker_image} \
+        --docker_image_target_path {params.docker_image_target_path} \
+        --results_dir {params.STAR_indices_dir}) \
+        &> {log}"""
+
+rule create_symb_links_for_STAR_indices:
+    """
+        create symbolyc links for STAR indices
+        so that then one can easily loop over samples
+    """
+    input:
+        max_read_length_estimate = os.path.join(
+            config["output_dir"],
+            "samples",
+            "{sample}",
+            "read_length",
+            "{sample}.max_read_length.txt"),
+        success_flag=os.path.join(
+            config["output_dir"],
+            "STAR_index","success.txt"),
+        script=os.path.join(workflow.basedir, "scripts", "create_symb_link_to_STAR_index.py"),
+    output:
+        STAR_index_symb_link = directory(os.path.join(
+            config["output_dir"],
+            "samples",
+            "{sample}",
+            "STAR_index")),
+    params:
+        sample_id = "{sample}",
+        STAR_indices_dir=os.path.join(
+            config["output_dir"],
+            "STAR_index"),        
+    threads: 1
+    log:
+        os.path.join(config["local_log"],"create_symb_links_for_demultiplexed_reads__{sample}.log")
+    shell:
+        """(python {input.script} \
+        --input_samples """+config["samples_file"]+""" \
+        --sample_id {params.sample_id} \
+        --max_read_length_estimate {input.max_read_length_estimate} \
+        --STAR_indices_dir {params.STAR_indices_dir} \
+        --link_to_create {output.STAR_index_symb_link}) &> {log}"""
+
+rule remove_polyg:
+    """
+        Remove remaining poly(G) stretches from 3' end of reads
+    """
+    input:
+        reads = os.path.join(
+            config["output_dir"],
+            "samples",
+            "{sample}",
+            "fastq",
+            "{sample}.fastq.gz"),
+    output:
+        no_polya_fastq = os.path.join(
+            config["output_dir"],
+            "samples",
+            "{sample}",
+            "fastq_trimmed",
+            "{sample}.fastq.gz"),
+    singularity:
+        "docker://continuumio/miniconda3:latest"
+    conda:
+        "envs/cutadapt.yaml"
+    threads: 10
+    log:
+        os.path.join(config["local_log"],"remove_polyg__{sample}.log")
+    shell:
+        """(cutadapt -m 1 -j {threads} -a "G{{10}};min_overlap=1;noindels;max_errors=0.2" -o {output.no_polya_fastq} {input.reads}) \
+        &> {log}"""
+
+rule fastqc_trimmed:
+    """
+        A quality control tool for high throughput sequence data
+    """
+    input:
+        reads=os.path.join(
+            config["output_dir"],
+            "samples",
+            "{sample}",
+            "fastq_trimmed",
+            "{sample}.fastq.gz"),
+    output:
+        outdir=directory(os.path.join(
+            config["output_dir"],
+            "samples",
+            "{sample}",
+            "fastqc_trimmed")),
+    threads: 10
+    singularity:
+        "docker://staphb/fastqc:0.12.1"
+    log:
+        os.path.join(config["local_log"],"fastqc_trimmed__{sample}.log")
+    shell:
+        """(set +o pipefail; mkdir -p {output.outdir}; \
+        fastqc --outdir {output.outdir} \
+        --threads {threads} \
+        {input.reads}) \
+        &> {log}"""
+
+rule trim_three_prime_adapter:
+    """
+        trim from three prime end
+    """
+    input:
+        reads = os.path.join(
+            config["output_dir"],
+            "samples",
+            "{sample}",
+            "fastq_trimmed",
+            "{sample}.fastq.gz"),
+    output:
+        trimmed_fastq = os.path.join(
+            config["output_dir"],
+            "samples",
+            "{sample}",
+            "fastq_three_prime_trimmed",
+            "{sample}.fastq.gz"),
+    params:
+        outdir = os.path.join(
+            config["output_dir"],
+            "samples",
+            "{sample}",
+            "fastq_three_prime_trimmed"),
+        adapter = config["three_prime_adapter"],
+    singularity:
+        "docker://continuumio/miniconda3:latest"
+    conda:
+        "envs/cutadapt.yaml"
+    threads: 10
+    log:
+        os.path.join(config["local_log"],"trim_three_prime__{sample}.log")
+    shell:
+        """(set +o pipefail; mkdir -p {params.outdir}; \
+        cutadapt -m 1 -j {threads} -a {params.adapter} -o {output.trimmed_fastq} {input.reads}) \
+        &> {log}"""
+
+rule fastqc_three_prime_trimmed:
+    """
+        A quality control tool for high throughput sequence data
+    """
+    input:
+        reads=os.path.join(
+            config["output_dir"],
+            "samples",
+            "{sample}",
+            "fastq_three_prime_trimmed",
+            "{sample}.fastq.gz"),
+    output:
+        outdir=directory(os.path.join(
+            config["output_dir"],
+            "samples",
+            "{sample}",
+            "fastqc_three_prime_trimmed")),
+    threads: 10
+    singularity:
+        "docker://staphb/fastqc:0.12.1"
+    log:
+        os.path.join(config["local_log"],"fastqc_three_prime_trimmed__{sample}.log")
+    shell:
+        """(set +o pipefail; mkdir -p {output.outdir}; \
+        fastqc --outdir {output.outdir} \
+        --threads {threads} \
+        {input.reads}) \
+        &> {log}"""
+
+rule map_genome_star_short_long:
+    """
+        Map to genome using STAR
+    """
+    input:
+        STAR_index_symb_link = os.path.join(
+            config["output_dir"],
+            "samples",
+            "{sample}",
+            "STAR_index"),
+        reads=os.path.join(
+            config["output_dir"],
+            "samples",
+            "{sample}",
+            "fastq_three_prime_trimmed",
+            "{sample}.fastq.gz"),
+    output:
+        bam=os.path.join(
+            config["output_dir"],
+            "samples",
+            "{sample}",
+            "map_genome_{short_long}",
+            "{sample}.Aligned.sortedByCoord.out.bam",
+        )
+    params:
+        outFileNamePrefix=lambda wildcards, output: output.bam.replace(
+            "Aligned.sortedByCoord.out.bam", ""
+        ),
+    singularity:
+        "docker://quay.io/biocontainers/star:2.7.8a--h9ee0642_1"
+    threads: 8
+    log:
+        os.path.join(config["local_log"],"map_genome_star_{short_long}__{sample}.log")
+    shell:
+        """(STAR \
+        --runMode alignReads \
+        --alignEndsType Local \
+        --runThreadN {threads} \
+        --genomeDir {input.STAR_index_symb_link} \
+        --readFilesIn {input.reads} \
+        --readFilesCommand zcat \
+        --outFileNamePrefix {params.outFileNamePrefix} \
+        --genomeLoad NoSharedMemory \
+        --outSAMtype BAM SortedByCoordinate \
+        --outFilterType BySJout \
+        --seedSearchStartLmax 8 \
+        --seedSearchStartLmaxOverLread 0.15 \
+        --outFilterMatchNmin 8 \
+        --alignSJDBoverhangMin 10 \
+        --alignSJoverhangMin 10 \
+        --outFilterMismatchNmax 2 \
+        --outFilterMismatchNoverReadLmax 1 \
+        --outFilterMatchNminOverLread 0 \
+        --outFilterScoreMinOverLread 0 \
+        --twopassMode Basic \
+        --outBAMsortingThreadN {threads} \
+        --outFilterMultimapNmax 500000000 \
+        --outSAMattributes NH HI AS nM MD \
+        --limitOutSJcollapsed 5000000) \
+        &> {log}"""
+
+current_rule = "samtools_index_mapped"        
+        
+rule samtools_index_mapped:
+    """
+        index bam files
+    """
+    input:
+        bam=os.path.join(
+            config["output_dir"],
+            "samples",
+            "{sample}",
+            "map_genome_{short_long}",
+            "{sample}.Aligned.sortedByCoord.out.bam",
+        ),
+    output:
+        bai = os.path.join(
+            config["output_dir"],
+            "samples",
+            "{sample}",
+            "map_genome_{short_long}",
+            "{sample}.Aligned.sortedByCoord.out.bam.bai"),
+    singularity:
+        "docker://quay.io/biocontainers/samtools:1.9--h10a08f8_12"
+    threads: 8
+    log:
+        os.path.join(config["local_log"],"samtools_index_mapped_{short_long}_{sample}.log")
+    shell:
+        """(samtools index \
+        {input.bam}; ) &> {log}"""
+
+rule get_uniquely_mapped_reads:
+    """
+        Get uniquely mapped reads
+    """
+    input:
+        bam=os.path.join(
+            config["output_dir"],
+            "samples",
+            "{sample}",
+            "map_genome_{short_long}",
+            "{sample}.Aligned.sortedByCoord.out.bam"),
+    output:
+        bam_filtered=os.path.join(
+            config["output_dir"],
+            "samples",
+            "{sample}",
+            "map_genome_{short_long}",
+            "{sample}.Aligned.sortedByCoord.out.unique.bam"),
+    params:
+        outdir = os.path.join(
+            config["output_dir"],
+            "samples",
+            "{sample}",
+            "map_genome_{short_long}_unique"),
+    singularity:
+        "docker://quay.io/biocontainers/samtools:1.9--h10a08f8_12"
+    threads: 4
+    log:
+        os.path.join(config["local_log"],"get_uniquely_mapped_reads_{short_long}_{sample}.log"),
+    shell:
+        """(set +o pipefail; mkdir -p {params.outdir}; \
+        samtools view -@ {threads} -h -q 255 -u {input.bam} | \
+        samtools sort -@ {threads} -o {output.bam_filtered}; \
+        samtools index -@ {threads} {output.bam_filtered}) \
+        &> {log}"""
+
+rule fastqc_uniquely_mapped:
+    """
+        A quality control tool for high throughput sequence data
+    """
+    input:
+        reads=os.path.join(
+            config["output_dir"],
+            "samples",
+            "{sample}",
+            "map_genome_{short_long}",
+            "{sample}.Aligned.sortedByCoord.out.unique.bam"),
+    output:
+        outdir=directory(os.path.join(
+            config["output_dir"],
+            "samples",
+            "{sample}",
+            "fastqc_mapped_{short_long}_unique")),
+    threads: 10
+    singularity:
+        "docker://staphb/fastqc:0.12.1"
+    log:
+        os.path.join(config["local_log"],"fastqc_mapped_unique_{short_long}_{sample}.log")
+    shell:
+        """(set +o pipefail; mkdir -p {output.outdir}; \
+        fastqc --outdir {output.outdir} \
+        --threads {threads} \
+        {input.reads}) \
+        &> {log}"""     
+
+rule get_low_duplicate_bam:
+    """
+        Get a low duplicate bam file
+    """
+    input:
+        bam = os.path.join(
+            config["output_dir"],
+            "samples",
+            "{sample}",
+            "map_genome_{short_long}",
+            "{sample}.Aligned.sortedByCoord.out.unique.bam"),
+    output:
+        bam_low_dupl=os.path.join(
+            config["output_dir"],
+            "samples",
+            "{sample}",
+            "map_genome_{short_long}",
+            "{sample}.low_duplicate.bam"),
+    params:
+        outdir = os.path.join(
+            config["output_dir"],
+            "samples",
+            "{sample}",
+            "map_genome_{short_long}"),
+        mkdupped_bam = os.path.join(
+                    config["output_dir"],
+                    "samples",
+                    "{sample}",
+                    "map_genome_{short_long}",
+                        "{sample}.merged.uniquely_mapped.mkdupped.bam"),
+        sorted_mkdupped_bam = os.path.join(
+                    config["output_dir"],
+                    "samples",
+                    "{sample}",
+                    "map_genome_{short_long}",
+                        "{sample}.merged.uniquely_mapped.mkdupped.sorted.bam"),
+        sorted_mkdupped_bai = os.path.join(
+                    config["output_dir"],
+                    "samples",
+                    "{sample}",
+                    "map_genome_{short_long}",
+                        "{sample}.merged.uniquely_mapped.mkdupped.sorted.bam.bai"),
+        selected_dup_levels_file = os.path.join(
+                    config["output_dir"],
+                    "samples",
+                    "{sample}",
+                    "map_genome_{short_long}",
+                        "selected_dup_levels.txt"),
+        deduplicated_bam_file_intermediate = os.path.join(
+                    config["output_dir"],
+                    "samples",
+                    "{sample}",
+                    "map_genome_{short_long}",
+                        "{sample}.dedup_intermediate.bam"),
+        selected_read_names_file = os.path.join(
+                    config["output_dir"],
+                    "samples",
+                    "{sample}",
+                    "map_genome_{short_long}",
+                        "selected_read_names.txt"),
+        low_duplicates_intermediate = os.path.join(
+                    config["output_dir"],
+                    "samples",
+                    "{sample}",
+                    "map_genome_{short_long}",
+                        "{sample}.low_duplicates_intermediate.bam"),
+        bam_low_dupl_nonsorted = os.path.join(
+                    config["output_dir"],
+                    "samples",
+                    "{sample}",
+                    "map_genome_{short_long}",
+                        "{sample}.merged.uniquely_mapped.low_duplicate.nonsorted.bam"),
+    conda:
+        os.path.join(workflow.basedir, "envs", "samtools_latest.yaml")
+    threads: 8
+    log:
+        os.path.join(config["local_log"],"get_low_duplicate_bam_{short_long}_{sample}.log"),
+    shell:
+        """(set +o pipefail; mkdir -p {params.outdir}; \
+        samtools collate -@ {threads} -O -u {input.bam} | \
+        samtools fixmate -@ {threads} -m -u - - | \
+        samtools sort -@ {threads} -u - | \
+        samtools markdup -@ {threads} --duplicate-count -t -S --include-fails - {params.mkdupped_bam}; \
+        samtools sort -@ {threads} {params.mkdupped_bam} > {params.sorted_mkdupped_bam}; \
+        samtools index -@ {threads} {params.sorted_mkdupped_bam}; \
+        printf "1\\n2\\n3\\n4\\n5\\n6\\n7\\n8\\n9\\n10" > {params.selected_dup_levels_file}; \
+        samtools view {params.sorted_mkdupped_bam} -@ {threads} -D dc:{params.selected_dup_levels_file} -u | samtools sort -@ {threads} - > {params.deduplicated_bam_file_intermediate}; \
+        samtools view -@ {threads} {params.deduplicated_bam_file_intermediate} | awk -F"\\t" '{{print $1}}' > {params.selected_read_names_file}; \
+        samtools view -@ {threads} -D do:{params.selected_read_names_file} -u {params.sorted_mkdupped_bam} | samtools sort -@ {threads} - > {params.low_duplicates_intermediate}; \
+        samtools merge -f -@ {threads} {params.bam_low_dupl_nonsorted} {params.low_duplicates_intermediate} {params.deduplicated_bam_file_intermediate}; \
+        samtools sort -@ {threads} {params.bam_low_dupl_nonsorted} > {output.bam_low_dupl}; \
+        samtools index -@ {threads} {output.bam_low_dupl}; \
+        rm -f {params.mkdupped_bam} {params.sorted_mkdupped_bam} {params.sorted_mkdupped_bai} {params.selected_dup_levels_file}; \
+        rm -f {params.deduplicated_bam_file_intermediate} {params.selected_read_names_file} {params.low_duplicates_intermediate}; \
+        rm -f {params.bam_low_dupl_nonsorted}; \
+        ) \
+        &> {log}"""
+
+rule fastqc_low_duplicate:
+    """
+        A quality control tool for high throughput sequence data
+    """
+    input:
+        reads=os.path.join(
+            config["output_dir"],
+            "samples",
+            "{sample}",
+            "map_genome_{short_long}",
+            "{sample}.low_duplicate.bam"),
+    output:
+        outdir=directory(os.path.join(
+            config["output_dir"],
+            "samples",
+            "{sample}",
+            "fastqc_low_duplicate_{short_long}")),
+    threads: 10
+    singularity:
+        "docker://staphb/fastqc:0.12.1"
+    log:
+        os.path.join(config["local_log"],"fastqc_low_duplicate__{sample}_{short_long}.log")
+    shell:
+        """(set +o pipefail; mkdir -p {output.outdir}; \
+        fastqc --outdir {output.outdir} \
+        --threads {threads} \
+        {input.reads}) \
+        &> {log}"""
+
+###
+### rules about quantification of read counts 
+###
+
+current_rule = "samtools_index_genome"
+
+rule samtools_index_genome:
+    """
+        Create .fai file from the input genome file.
+    """
+    input:
+        genome=lambda wildcards: samples.loc[samples["organism"] == wildcards.organism]["genome_file"].iloc[0],
+    output:
+        genome_fai=os.path.join(
+                config["output_dir"], "genome_indices", "{organism}", "genome.fai"
+            ),
+    params:
+        output_dir=lambda wildcards, output: os.path.dirname(output.genome_fai),
+        intermediate_file=lambda wildcards: samples.loc[samples["organism"] == wildcards.organism]["genome_file"].iloc[0]+'.fai',
+    singularity:
+        "docker://quay.io/biocontainers/samtools:1.9--h10a08f8_12"
+    threads: 1
+    log:
+        os.path.join(config["local_log"],"samtools_index_genome__{organism}.log"),
+    shell:
+        """(mkdir -p {params.output_dir}; samtools faidx {input.genome} && mv {params.intermediate_file} {output.genome_fai}) \
+        &> {log}"""
+
+        
+current_rule = "get_genome_segmentations"
+
+rule get_genome_segmentations:
+    """
+        Create .bed file from the input gtf in the GENCODE format. 
+        The output contains disjoint segments covering all the genome, including intergenic regions.
+        The created files will be further used for gene coverage and gene expression analysis.
+    """
+    input:
+        gtf=lambda wildcards: samples.loc[samples["organism"] == wildcards.organism]["gtf_file"].iloc[0],
+        genome_fai=os.path.join(
+                config["output_dir"], "genome_indices", "{organism}", "genome.fai"
+            ),
+        script=os.path.join(workflow.basedir, "scripts", "get_genome_segmentations.py"),
+    output:
+        exon_intron_genome_segmentation=os.path.join(
+                config["output_dir"], "transcriptome", "{organism}", "exon_intron_genome_segmentation.bed"
+            ),
+        binned_genome_segmentation=os.path.join(
+                config["output_dir"], "transcriptome", "{organism}", "binned_genome_segmentation.bed"
+            ),
+        modified_gtf = os.path.join(
+                config["output_dir"], "transcriptome", "{organism}", "modified_annotation.gtf"
+        ),
+    params:
+        temp_dir=os.path.join(config["output_dir"], "transcriptome", "{organism}", "temp"),
+        bin_size=10,
+        gene_flank = 1000,
+        
+    # singularity:
+    #     "docker://continuumio/miniconda3:latest"
+    conda:
+        "envs/pandas_bedtools.yaml"
+    threads: 1
+    log:
+        os.path.join(config["local_log"],"get_genome_segmentations__{organism}.log"),
+    shell:
+        """(mkdir -p {params.temp_dir}; python {input.script} \
+        --input_gtf {input.gtf} \
+        --input_genome_fai {input.genome_fai} \
+        --output_exon_intron_gs {output.exon_intron_genome_segmentation} \
+        --output_binned_gs {output.binned_genome_segmentation} \
+        --bin_size {params.bin_size} \
+        --temp_dir {params.temp_dir} \
+        --output_modified_gtf {output.modified_gtf} \
+        --gene_flank {params.gene_flank}) \
+        &> {log}"""
+
+current_rule = "bamTobed"
+
+rule bamTobed:
+    """
+        Get a bed file from a bam file
+    """
+    input:
+        bam = os.path.join(
+            config["output_dir"],
+            "samples",
+            "{sample}",
+            "map_genome_{short_long}",
+            "{sample}.low_duplicate.bam"),
+    output:
+        bed=os.path.join(
+            config["output_dir"],
+            "samples",
+            "{sample}",
+            "map_genome_{short_long}",
+            "{sample}.dedup.sorted.indexed.bed"),
+    singularity:
+        "docker://pegi3s/bedtools:latest"
+    threads: 1
+    log:
+        os.path.join(config["local_log"],"bamTobed_{short_long}_{sample}.log"),
+    shell:
+        """(bedtools bamtobed -split -i {input.bam} | bedtools sort > {output.bed}) \
+        &> {log}"""
+
+rule groupBamToBedFile:
+    """
+        Grouping bed file with reads, weigthning multimappers and duplicated reads
+    """
+    input:
+        bed=os.path.join(
+            config["output_dir"],
+            "samples",
+            "{sample}",
+            "map_genome_{short_long}",
+            "{sample}.dedup.sorted.indexed.bed",
+        ),
+        script=os.path.join(workflow.basedir, "scripts", "group_BamToBed_file.py"),
+    output:
+        grouped_bed=os.path.join(
+            config["output_dir"],
+            "samples",
+            "{sample}",
+            "map_genome_{short_long}",
+            "{sample}.dedup.sorted.indexed.grouped.bed",
+        ),
+        duplicates_summary=os.path.join(
+            config["output_dir"],
+            "samples",
+            "{sample}",
+            "segment_counts_{short_long}",
+            "{sample}.duplicates_summary.tsv",
+        ),        
+    # singularity:
+    #     "docker://continuumio/miniconda3:latest"
+    conda:
+        "envs/pandas_bedtools.yaml"
+    threads: 1
+    log:
+        os.path.join(config["local_log"],"groupBamToBedFile_{short_long}_{sample}.log"),
+    shell:
+        """(python {input.script} \
+        --input_bed {input.bed} \
+        --grouped_bed {output.grouped_bed} \
+        --duplicates_summary {output.duplicates_summary}) \
+        &> {log}"""
+
+checkpoint separate_grouped_bed_into_chromosomes:
+    """
+        separate into chromosomes, for less memory consumption
+    """
+    input:
+        grouped_bed=os.path.join(
+            config["output_dir"],
+            "samples",
+            "{sample}",
+            "map_genome_{short_long}",
+            "{sample}.dedup.sorted.indexed.grouped.bed",
+        ),
+    output:
+        outdir=directory(os.path.join(
+            config["output_dir"],
+            "samples",
+            "{sample}",
+            "map_genome_{short_long}",
+            "over_chrs",
+        )),       
+    params:
+        chrs = lambda wildcards: samples.loc[wildcards.sample, "chromosomes"],
+    threads: 1
+    log:
+        os.path.join(config["local_log"],"separate_grouped_bed_into_chromosomes_{short_long}_{sample}.log"),
+    shell:
+        """(set +o pipefail; mkdir -p {output.outdir}; awk -F"\\t" '{{print>"{output.outdir}/"$1".grouped.bed"}}' {input.grouped_bed}; \
+        for i in {params.chrs}; do \
+        touch {output.outdir}/$i.grouped.bed; \
+        done; \
+        ) &> {log}"""
+
+checkpoint separate_binned_genome_segmentation_into_chromosomes:
+    """
+        separate genome segmentation into chromosomes, for less memory consumption
+    """
+    input:
+        genome_segmentation=os.path.join(
+            config["output_dir"],
+            "transcriptome",
+            "{organism}",
+            "binned_genome_segmentation.bed",
+        ),
+    output:
+        outdir=directory(os.path.join(
+            config["output_dir"],
+            "transcriptome",
+            "{organism}",
+            "binned_genome_segmentation_over_chrs"
+        )),    
+    params:
+        chrs = lambda wildcards: samples.loc[samples['organism']==wildcards.organism].iloc[0]['chromosomes'],
+    threads: 1
+    log:
+        os.path.join(config["local_log"],"separate_binned_genome_segmentation_into_chromosomes_{organism}.log"),
+    shell:
+        """(set +o pipefail; mkdir -p {output.outdir}; awk -F"\\t" '{{print>"{output.outdir}/"$1".bed"}}' {input.genome_segmentation}; \
+        for i in {params.chrs}; do \
+        touch {output.outdir}/$i.bed; \
+        done; \
+        ) &> {log}"""
+
+rule get_sel_TSSs_for_metaplots:
+    """
+        Create .bed files from the input gtf in the GENCODE format.
+    """
+    input:
+        modified_gtf = os.path.join(
+                config["output_dir"], "transcriptome", "{organism}", "modified_annotation.gtf"
+        ),
+        script=os.path.join(workflow.basedir, "scripts", "get_sel_TSSs.py"),
+    output:
+        output_dir=directory(os.path.join(
+                config["output_dir"], "transcriptome", "{organism}", "selected_TSSs_over_chrs_for_metaplots"
+            )),
+    params:
+        borders="0,150,-1000,0,150,1000",
+        
+    # singularity:
+    #     "docker://continuumio/miniconda3:latest"
+    conda:
+        "envs/pandas_bedtools.yaml"
+    threads: 3
+    log:
+        os.path.join(config["local_log"],"get_sel_TSSs_for_metaplots__{organism}.log"),
+    shell:
+        """(mkdir -p {output.output_dir}; \
+        python {input.script} \
+        --input_gtf {input.modified_gtf} \
+        --output_dir {output.output_dir} \
+        --borders {params.borders}) \
+        &> {log}"""
+
+checkpoint get_sel_TSSs_for_quantification:
+    """
+        Create .bed files from the input gtf in the GENCODE format.
+    """
+    input:
+        modified_gtf = os.path.join(
+                config["output_dir"], "transcriptome", "{organism}", "modified_annotation.gtf"
+        ),
+        script=os.path.join(workflow.basedir, "scripts", "get_sel_TSSs.py"),
+    output:
+        output_dir=directory(os.path.join(
+                config["output_dir"], "transcriptome", "{organism}", "selected_TSSs_over_chrs_for_quantification"
+            )),
+    params:
+        borders="0,150,-150,0,150,300",
+        
+    # singularity:
+    #     "docker://continuumio/miniconda3:latest"
+    conda:
+        "envs/pandas_bedtools.yaml"
+    threads: 3
+    log:
+        os.path.join(config["local_log"],"get_sel_TSSs_for_quantification__{organism}.log"),
+    shell:
+        """(mkdir -p {output.output_dir}; \
+        python {input.script} \
+        --input_gtf {input.modified_gtf} \
+        --output_dir {output.output_dir} \
+        --borders {params.borders}) \
+        &> {log}"""
+
+
+rule map_to_exon_intron_segmentation:
+    """
+        Map bamTobed file to genomic segmentation
+    """
+    input:
+        grouped_bed=os.path.join(
+            config["output_dir"],
+            "samples",
+            "{sample}",
+            "map_genome_{short_long}",
+            "{sample}.dedup.sorted.indexed.grouped.bed",
+        ),
+        genome_segmentation=lambda wildcards: os.path.join(
+            config["output_dir"],
+            "transcriptome",
+            samples.loc[wildcards.sample]["organism"],
+            "exon_intron_genome_segmentation.bed",
+        ),
+        script=os.path.join(workflow.basedir, "scripts", "map_to_genome_segmentation.py"),
+    output:
+        wd_counts=os.path.join(
+            config["output_dir"],
+            "samples",
+            "{sample}",
+            "segment_counts_{short_long}",
+            "exon_intron",
+            "{sample}.wd_counts.tsv",
+        ),
+        wd_coverage=os.path.join(
+            config["output_dir"],
+            "samples",
+            "{sample}",
+            "segment_counts_{short_long}",
+            "exon_intron",
+            "{sample}.wd_coverage.bed",
+        ),
+    params:
+        directionality=lambda wildcards: samples.loc[wildcards.sample]["directionality"],
+        temp_dir = os.path.join(
+            config["output_dir"],
+            "samples",
+            "{sample}",
+            "segment_counts_{short_long}",
+            "exon_intron",
+            "temp",
+        ),
+    # singularity:
+    #     "docker://continuumio/miniconda3:latest"
+    conda:
+        os.path.join(workflow.basedir, "envs", "bedtools.yaml")
+    threads: 1
+    log:
+        os.path.join(config["local_log"],"map_to_exon_intron_segmentation_{short_long}_{sample}.log"),
+    shell:
+        """(set +o pipefail; mkdir -p {params.temp_dir}; python {input.script} \
+        --grouped_bed {input.grouped_bed} \
+        --genome_segmentation {input.genome_segmentation} \
+        --wd_counts {output.wd_counts} \
+        --wd_coverage {output.wd_coverage} \
+        --directionality {params.directionality} \
+        --temp_dir {params.temp_dir}) \
+        &> {log}"""
+            
+rule map_to_binned_segmentation_by_chromosomes:
+    """
+        Map bamTobed file to genomic segmentation
+    """
+    input:
+        grouped_bed=get_chr_separated_group_bed_files,
+        genome_segmentation=get_chr_separated_binned_genome_segmentation,
+        script=os.path.join(workflow.basedir, "scripts", "map_to_genome_segmentation.py"),
+    output:
+        wd_counts=os.path.join(
+            config["output_dir"],
+            "samples",
+            "{sample}",
+            "segment_counts_{short_long}",
+            "binned_genome",
+            "{sample}.{chr}.wd_counts.tsv",
+        ),
+        wd_coverage=os.path.join(
+            config["output_dir"],
+            "samples",
+            "{sample}",
+            "segment_counts_{short_long}",
+            "binned_genome",
+            "{sample}.{chr}.wd_coverage.bed",
+        ),
+    params:
+        directionality=lambda wildcards: samples.loc[wildcards.sample]["directionality"],
+        temp_dir = os.path.join(
+            config["output_dir"],
+            "samples",
+            "{sample}",
+            "segment_counts_{short_long}",
+            "binned_genome",
+            "temp_{chr}",
+        ),
+    # singularity:
+    #     "docker://continuumio/miniconda3:latest"
+    conda:
+        os.path.join(workflow.basedir, "envs", "bedtools.yaml")
+    threads: 1
+    log:
+        os.path.join(config["local_log"],"map_to_binned_segmentation_by_chromosomes_{short_long}_{sample}_{chr}.log"),
+    shell:
+        """(set +o pipefail; mkdir -p {params.temp_dir}; python {input.script} \
+        --grouped_bed {input.grouped_bed} \
+        --genome_segmentation {input.genome_segmentation} \
+        --wd_counts {output.wd_counts} \
+        --wd_coverage {output.wd_coverage} \
+        --directionality {params.directionality} \
+        --temp_dir {params.temp_dir}) \
+        &> {log}"""
+
+rule map_to_binned_segmentation_by_chromosomes_5ends:
+    """
+        Map bamTobed file to genomic segmentation
+    """
+    input:
+        grouped_bed=get_chr_separated_group_bed_files,
+        genome_segmentation=get_chr_separated_binned_genome_segmentation,
+        script=os.path.join(workflow.basedir, "scripts", "map_to_genome_segmentation.py"),
+    output:
+        wd_counts=os.path.join(
+            config["output_dir"],
+            "samples",
+            "{sample}",
+            "segment_counts_{short_long}",
+            "binned_genome_5ends",
+            "{sample}.{chr}.wd_counts.tsv",
+        ),
+        wd_coverage=os.path.join(
+            config["output_dir"],
+            "samples",
+            "{sample}",
+            "segment_counts_{short_long}",
+            "binned_genome_5ends",
+            "{sample}.{chr}.wd_coverage.bed",
+        ),
+    params:
+        directionality=lambda wildcards: samples.loc[wildcards.sample]["directionality"],
+        temp_dir = os.path.join(
+            config["output_dir"],
+            "samples",
+            "{sample}",
+            "segment_counts_{short_long}",
+            "binned_genome_5ends",
+            "temp_{chr}",
+        ),
+        mapping_mode = "5end",
+    # singularity:
+    #     "docker://continuumio/miniconda3:latest"
+    conda:
+        os.path.join(workflow.basedir, "envs", "bedtools.yaml")
+    threads: 1
+    log:
+        os.path.join(config["local_log"],"map_to_binned_segmentation_by_chromosomes_5ends_{short_long}_{sample}_{chr}.log"),
+    shell:
+        """(set +o pipefail; mkdir -p {params.temp_dir}; python {input.script} \
+        --grouped_bed {input.grouped_bed} \
+        --genome_segmentation {input.genome_segmentation} \
+        --wd_counts {output.wd_counts} \
+        --wd_coverage {output.wd_coverage} \
+        --directionality {params.directionality} \
+        --temp_dir {params.temp_dir} \
+        --mapping_mode {params.mapping_mode}) \
+        &> {log}"""
+
+
+rule map_to_sel_TSSs_by_chromosomes:
+    """
+        Map bamTobed file to genomic segmentation
+    """
+    input:
+        grouped_bed=get_chr_separated_group_bed_files,
+        genome_segmentation=get_chr_sel_TSSs_for_quantification,
+        script=os.path.join(workflow.basedir, "scripts", "map_to_genome_segmentation.py"),
+    output:
+        wd_counts=os.path.join(
+            config["output_dir"],
+            "samples",
+            "{sample}",
+            "segment_counts_{short_long}",
+            "sel_TSSs",
+            "{sample}.{chr}.wd_counts.tsv",
+        ),
+        wd_coverage=os.path.join(
+            config["output_dir"],
+            "samples",
+            "{sample}",
+            "segment_counts_{short_long}",
+            "sel_TSSs",
+            "{sample}.{chr}.wd_coverage.bed",
+        ),
+    params:
+        directionality=lambda wildcards: samples.loc[wildcards.sample]["directionality"],
+        temp_dir = os.path.join(
+            config["output_dir"],
+            "samples",
+            "{sample}",
+            "segment_counts_{short_long}",
+            "sel_TSSs",
+            "temp_{chr}",
+        ),
+    # singularity:
+    #     "docker://continuumio/miniconda3:latest"
+    conda:
+        os.path.join(workflow.basedir, "envs", "bedtools.yaml")
+    threads: 1
+    log:
+        os.path.join(config["local_log"],"map_to_sel_TSSs_by_chromosomes_{short_long}_{sample}_{chr}.log"),
+    shell:
+        """(set +o pipefail; mkdir -p {params.temp_dir}; python {input.script} \
+        --grouped_bed {input.grouped_bed} \
+        --genome_segmentation {input.genome_segmentation} \
+        --wd_counts {output.wd_counts} \
+        --wd_coverage {output.wd_coverage} \
+        --directionality {params.directionality} \
+        --temp_dir {params.temp_dir}) \
+        &> {log}"""
+
+rule draw_metaplots:
+    """
+        draw metaplots based on the mapped binnged genome files
+    """
+    input:
+        wd_counts=lambda wildcards: expand(os.path.join(
+            config["output_dir"],
+            "samples",
+            "{{sample}}",
+            "segment_counts_{{short_long}}",
+            "binned_genome",
+            "{{sample}}.{chr}.wd_counts.tsv",
+        ),
+        chr = samples.loc[wildcards.sample]['chromosomes'].split(' '),),
+        selected_TSSs_over_chrs_dir=lambda wildcards: os.path.join(
+                config["output_dir"], "transcriptome", samples.loc[wildcards.sample, "organism"], "selected_TSSs_over_chrs_for_metaplots"
+            ),
+        script=os.path.join(workflow.basedir, "scripts", "draw_metaplots.py"),
+    output:
+        out_pdf = os.path.join(config["output_dir"],"samples","{sample}","segment_counts_{short_long}","metaplot","{sample}.1.uniquely_mapped_0.metaplot_density.pdf"),
+    params:
+        binned_genome_dir=os.path.join(
+            config["output_dir"],
+            "samples",
+            "{sample}",
+            "segment_counts_{short_long}",
+            "binned_genome"),
+        start_samples = config["samples_file"],
+        sample = "{sample}",
+        directionality=lambda wildcards: samples.loc[wildcards.sample]["directionality"],
+        metaplot_dir = os.path.join(config["output_dir"],"samples","{sample}","segment_counts_{short_long}","metaplot"),
+    # singularity:
+    #     "docker://continuumio/miniconda3:latest"
+    conda:
+        os.path.join(workflow.basedir, "envs", "seaborn.yaml") 
+    threads: 1
+    log:
+        os.path.join(config["local_log"],"draw_metaplots_{sample}_{short_long}.log")
+    shell:
+        """(mkdir -p {params.metaplot_dir}; \
+        python {input.script} \
+        --start_samples {params.start_samples} \
+        --sample {params.sample} \
+        --binned_genome_dir {params.binned_genome_dir} \
+        --selected_TSSs_over_chrs_dir {input.selected_TSSs_over_chrs_dir} \
+        --metaplot_dir {params.metaplot_dir}) \
+        &> {log}"""
+
+rule draw_metaplots_5ends:
+    """
+        draw metaplots based on the mapped binnged genome files
+    """
+    input:
+        wd_counts=lambda wildcards: expand(os.path.join(
+            config["output_dir"],
+            "samples",
+            "{{sample}}",
+            "segment_counts_{{short_long}}",
+            "binned_genome_5ends",
+            "{{sample}}.{chr}.wd_counts.tsv",
+        ),
+        chr = samples.loc[wildcards.sample]['chromosomes'].split(' '),),
+        selected_TSSs_over_chrs_dir=lambda wildcards: os.path.join(
+                config["output_dir"], "transcriptome", samples.loc[wildcards.sample, "organism"], "selected_TSSs_over_chrs_for_metaplots"
+            ),
+        script=os.path.join(workflow.basedir, "scripts", "draw_metaplots.py"),
+    output:
+        out_pdf = os.path.join(config["output_dir"],"samples","{sample}","segment_counts_{short_long}","metaplot_5ends","{sample}.1.uniquely_mapped_0.metaplot_density.pdf"),
+    params:
+        binned_genome_dir=os.path.join(
+            config["output_dir"],
+            "samples",
+            "{sample}",
+            "segment_counts_{short_long}",
+            "binned_genome_5ends"),
+        start_samples = config["samples_file"],
+        sample = "{sample}",
+        directionality=lambda wildcards: samples.loc[wildcards.sample]["directionality"],
+        metaplot_dir = os.path.join(config["output_dir"],"samples","{sample}","segment_counts_{short_long}","metaplot_5ends"),
+    # singularity:
+    #     "docker://continuumio/miniconda3:latest"
+    conda:
+        os.path.join(workflow.basedir, "envs", "seaborn.yaml") 
+    threads: 1
+    log:
+        os.path.join(config["local_log"],"draw_metaplots_5ends_{sample}_{short_long}.log")
+    shell:
+        """(mkdir -p {params.metaplot_dir}; \
+        python {input.script} \
+        --start_samples {params.start_samples} \
+        --sample {params.sample} \
+        --binned_genome_dir {params.binned_genome_dir} \
+        --selected_TSSs_over_chrs_dir {input.selected_TSSs_over_chrs_dir} \
+        --metaplot_dir {params.metaplot_dir}) \
+        &> {log}"""
+
+###
+### rules about categorizing each read category in details 
+###
+
+rule get_read_names_for_each_read_category:
+    """
+        For each read category (duplication level x (mm or um)), get two lists: a list of read names and their weights
+    """
+    input:
+        grouped_bed=os.path.join(
+            config["output_dir"],
+            "samples",
+            "{sample}",
+            "map_genome_{short_long}",
+            "{sample}.dedup.sorted.indexed.grouped.bed",
+        ),
+        bed=os.path.join(
+            config["output_dir"],
+            "samples",
+            "{sample}",
+            "map_genome_{short_long}",
+            "{sample}.dedup.sorted.indexed.bed",
+        ),
+        script=os.path.join(workflow.basedir, "scripts", "get_read_names_for_each_read_category.py"),
+    output:
+        category_specific_read_names = expand(os.path.join(config["output_dir"],"samples","{{sample}}","map_genome_{{short_long}}","read_categories","{d_cat}_{mm_mode}","{{sample}}.{d_cat}_{mm_mode}.read_names.txt"),
+                                        mm_mode = ['um','mm'], d_cat = ['0','1','2','3','4','5']),
+    # singularity:
+    #     "docker://continuumio/miniconda3:latest"
+    conda:
+        os.path.join(workflow.basedir, "envs", "bedtools.yaml")    
+    threads: 1
+    log:
+        os.path.join(config["local_log"],"get_read_names_for_each_read_category_{short_long}_{sample}.log"),
+    shell:
+        """(python {input.script} \
+        --grouped_bed {input.grouped_bed} \
+        --bed {input.bed}) \
+        &> {log}"""
+
+rule picard_get_sam_file_for_read_categories:
+    """
+        get filtered sam file
+    """
+    input:
+        category_specific_read_names=os.path.join(
+            config["output_dir"],
+            "samples",
+            "{sample}",
+            "map_genome_{short_long}",
+            "read_categories",
+            "{d_cat}_{mm_mode}",
+            "{sample}.{d_cat}_{mm_mode}.read_names.txt"),
+        bam = os.path.join(
+            config["output_dir"],
+            "samples",
+            "{sample}",
+            "map_genome_{short_long}",
+            "{sample}.low_duplicate.bam"),
+    output:
+        category_specific_sam_file = temp(os.path.join(config["output_dir"],"samples","{sample}","map_genome_{short_long}","read_categories","{d_cat}_{mm_mode}","{sample}.{d_cat}_{mm_mode}.sam")),
+    singularity:
+        "docker://broadinstitute/picard:latest"
+    threads: 4
+    log:
+        os.path.join(config["local_log"],"picard_get_sam_file_for_read_categories_{sample}_{short_long}_{d_cat}_{mm_mode}.log")
+    shell:
+        """(set +o pipefail; \
+        t=$(wc -w {input.category_specific_read_names} | cut -d " " -f1); \
+        if [[ "$t" == "1" ]]; then echo "empty" > {output.category_specific_sam_file}; \
+        else java -jar /usr/picard/picard.jar FilterSamReads I={input.bam} O={output.category_specific_sam_file} \
+        READ_LIST_FILE={input.category_specific_read_names} FILTER=includeReadList;fi ) &> {log}"""
+
+rule samtools_get_bam_file_for_read_categories:
+    """
+        get bam file from a sam file
+    """
+    input:
+        category_specific_sam_file=os.path.join(
+            config["output_dir"],
+            "samples",
+            "{sample}",
+            "map_genome_{short_long}",
+            "read_categories",
+            "{d_cat}_{mm_mode}","{sample}.{d_cat}_{mm_mode}.sam"),
+    output:
+        category_specific_bam_file = os.path.join(
+            config["output_dir"],
+            "samples",
+            "{sample}",
+            "map_genome_{short_long}",
+            "read_categories",
+            "{d_cat}_{mm_mode}","{sample}.{d_cat}_{mm_mode}.bam"),
+    singularity:
+        "docker://quay.io/biocontainers/samtools:1.9--h10a08f8_12"
+    threads: 4
+    log:
+        os.path.join(config["local_log"],"samtools_get_bam_file_for_read_categories_{sample}_{short_long}_{d_cat}_{mm_mode}.log")
+    shell:
+        """(set +o pipefail; \
+        t=$(wc -w {input.category_specific_sam_file} | cut -d " " -f1); \
+        if [[ "$t" == "1" ]]; then echo "empty" > {output.category_specific_bam_file}; \
+        else samtools view -bo {output.category_specific_bam_file} {input.category_specific_sam_file};fi ) &> {log}"""      
+
+rule samtools_sort_bam_file_for_read_categories:
+    """
+        sort bam files
+    """
+    input:
+        bam=os.path.join(
+            config["output_dir"],
+            "samples",
+            "{sample}",
+            "map_genome_{short_long}",
+            "read_categories",
+            "{d_cat}_{mm_mode}","{sample}.{d_cat}_{mm_mode}.bam"),
+        category_specific_sam_file=os.path.join(
+            config["output_dir"],
+            "samples",
+            "{sample}",
+            "map_genome_{short_long}",
+            "read_categories",
+            "{d_cat}_{mm_mode}","{sample}.{d_cat}_{mm_mode}.sam"),
+    output:
+        sorted_bam = os.path.join(
+            config["output_dir"],
+            "samples",
+            "{sample}",
+            "map_genome_{short_long}",
+            "read_categories",
+            "{d_cat}_{mm_mode}","{sample}.{d_cat}_{mm_mode}.sorted.bam"),
+    singularity:
+        "docker://quay.io/biocontainers/samtools:1.9--h10a08f8_12"
+    threads: 8
+    log:
+        os.path.join(config["local_log"],"samtools_sort_bam_file_for_read_categories_{sample}_{short_long}_{d_cat}_{mm_mode}.log")
+    shell:
+        """(set +o pipefail; \
+        t=$(wc -w {input.category_specific_sam_file} | cut -d " " -f1); \
+        if [[ "$t" == "1" ]]; then echo "empty" > {output.sorted_bam}; \
+        else samtools sort {input.bam} > {output.sorted_bam};fi ) &> {log}"""
+
+rule samtools_index_bam_file_for_read_categories:
+    """
+        sort bam files
+    """
+    input:
+        sorted_bam=os.path.join(
+            config["output_dir"],
+            "samples",
+            "{sample}",
+            "map_genome_{short_long}",
+            "read_categories",
+            "{d_cat}_{mm_mode}","{sample}.{d_cat}_{mm_mode}.sorted.bam"),
+        category_specific_sam_file=os.path.join(
+            config["output_dir"],
+            "samples",
+            "{sample}",
+            "map_genome_{short_long}",
+            "read_categories",
+            "{d_cat}_{mm_mode}","{sample}.{d_cat}_{mm_mode}.sam"),
+    output:
+        bai = os.path.join(
+            config["output_dir"],
+            "samples",
+            "{sample}",
+            "map_genome_{short_long}",
+            "read_categories",
+            "{d_cat}_{mm_mode}","{sample}.{d_cat}_{mm_mode}.sorted.bam.bai"),
+    singularity:
+        "docker://quay.io/biocontainers/samtools:1.9--h10a08f8_12"
+    threads: 8
+    log:
+        os.path.join(config["local_log"],"samtools_index_bam_file_for_read_categories_{sample}_{short_long}_{d_cat}_{mm_mode}.log")
+    shell:
+        """(set +o pipefail; \
+        t=$(wc -w {input.category_specific_sam_file} | cut -d " " -f1); \
+        if [[ "$t" == "1" ]]; then echo "empty" > {output.bai}; \
+        else samtools index {input.sorted_bam};fi ) &> {log}"""
+
+rule samtools_get_no_header_sam:
+    """
+        get sam file without a header
+    """
+    input:
+        category_specific_sam_file=os.path.join(
+            config["output_dir"],
+            "samples",
+            "{sample}",
+            "map_genome_{short_long}",
+            "read_categories",
+            "{d_cat}_{mm_mode}","{sample}.{d_cat}_{mm_mode}.sam"),
+    output:
+        no_header_sam = temp(os.path.join(config["output_dir"],"samples","{sample}","map_genome_{short_long}","read_categories","{d_cat}_{mm_mode}","no_header.sam")),
+    singularity:
+        "docker://quay.io/biocontainers/samtools:1.9--h10a08f8_12"
+    threads: 4
+    log:
+        os.path.join(config["local_log"],"samtools_get_sam_file_for_read_categories_{sample}_{short_long}_{d_cat}_{mm_mode}.log")
+    shell:
+        """(set +o pipefail; \
+        t=$(wc -w {input.category_specific_sam_file} | cut -d " " -f1); \
+        if [[ "$t" == "1" ]]; then echo "empty" > {output.no_header_sam}; \
+        else samtools view {input.category_specific_sam_file} > {output.no_header_sam};fi ) &> {log}"""
+
+rule get_cigar_stats_from_sam_file:
+    """
+        get cigar stats from sam file
+    """
+    input:
+        category_specific_sam_file=os.path.join(
+            config["output_dir"],
+            "samples",
+            "{sample}",
+            "map_genome_{short_long}",
+            "read_categories",
+            "{d_cat}_{mm_mode}","{sample}.{d_cat}_{mm_mode}.sam"),
+        no_header_sam = os.path.join(
+            config["output_dir"],
+            "samples",
+            "{sample}",
+            "map_genome_{short_long}",
+            "read_categories",
+            "{d_cat}_{mm_mode}","no_header.sam"),
+        category_specific_read_names=os.path.join(
+            config["output_dir"],
+            "samples",
+            "{sample}",
+            "map_genome_{short_long}",
+            "read_categories",
+            "{d_cat}_{mm_mode}",
+            "{sample}.{d_cat}_{mm_mode}.read_names.txt"),
+        script=os.path.join(workflow.basedir, "scripts", "get_cigar_stats_from_sam_file.py"),
+    output:
+        cigar_stats = os.path.join(config["output_dir"],"samples","{sample}","map_genome_{short_long}","read_categories","{d_cat}_{mm_mode}","{sample}.{d_cat}_{mm_mode}.cigar_stats.tsv"),
+    singularity:
+        "docker://continuumio/miniconda3:latest"
+    conda:
+        os.path.join(workflow.basedir, "envs", "bedtools.yaml") 
+    threads: 1
+    log:
+        os.path.join(config["local_log"],"get_cigar_stats_from_sam_file_{sample}_{short_long}_{d_cat}_{mm_mode}.log")
+    shell:
+        """(t=$(wc -w {input.category_specific_sam_file} | cut -d " " -f1); \
+        if [[ "$t" == "1" ]]; then echo "empty" > {output.cigar_stats}; \
+        else python {input.script} \
+        --category_specific_sam_file {input.no_header_sam} \
+        --category_specific_read_names {input.category_specific_read_names} \
+        --output_file {output.cigar_stats}; fi) \
+        &> {log}"""
+
+rule fastqc_category_specific_fastq:
+    """
+        A quality control tool for high throughput sequence data
+    """
+    input:
+        reads=os.path.join(
+            config["output_dir"],
+            "samples",
+            "{sample}",
+            "map_genome_{short_long}",
+            "read_categories",
+            "{d_cat}_{mm_mode}","{sample}.{d_cat}_{mm_mode}.sorted.bam"),
+        category_specific_sam_file=os.path.join(
+                    config["output_dir"],
+                    "samples",
+                    "{sample}",
+                    "map_genome_{short_long}",
+                    "read_categories",
+                    "{d_cat}_{mm_mode}","{sample}.{d_cat}_{mm_mode}.sam"),
+    output:
+        outdir=directory(os.path.join(
+            config["output_dir"],
+            "samples",
+            "{sample}",
+            "map_genome_{short_long}",
+            "read_categories",
+            "{d_cat}_{mm_mode}","fastqc")),
+    threads: 1
+    singularity:
+        "docker://staphb/fastqc:0.12.1"
+    log:
+        os.path.join(config["local_log"],"fastqc_category_specific_fastq_{sample}_{short_long}_{d_cat}_{mm_mode}.log")
+    shell:
+        """(set +o pipefail; mkdir -p {output.outdir}; \
+        t=$(wc -w {input.category_specific_sam_file} | cut -d " " -f1); \
+        if [[ "$t" == "1" ]]; then echo "empty" > {output.outdir}/empty.txt; \
+        else \
+        fastqc --outdir {output.outdir} \
+        --threads {threads} \
+        {input.reads}; fi) \
+        &> {log}"""
